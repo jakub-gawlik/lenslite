@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LensLite demo</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 24px 16px 48px;
+      background: #111;
+      color: #eee;
+      font: 16px/1.5 system-ui, sans-serif;
+    }
+    h1 { font-size: 20px; }
+    h2 { font-size: 16px; margin-top: 32px; }
+    p, li { color: #bbb; font-size: 14px; }
+    section { max-width: 720px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 8px;
+    }
+    .grid img, .single img, .figures img {
+      width: 100%;
+      aspect-ratio: 1;
+      object-fit: cover;
+      border-radius: 8px;
+      cursor: pointer;
+      background: #222;
+    }
+    .single { max-width: 200px; }
+    .figures {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+    .figures figure { margin: 0; cursor: pointer; }
+    .figures figcaption { font-size: 12px; color: #999; padding-top: 4px; }
+    #log {
+      background: #1a1a1a;
+      border-radius: 8px;
+      padding: 12px;
+      font: 12px/1.6 ui-monospace, monospace;
+      color: #8c8;
+      min-height: 3em;
+      max-height: 12em;
+      overflow-y: auto;
+      white-space: pre-wrap;
+    }
+  </style>
+</head>
+<body>
+  <h1>LensLite</h1>
+  <p>Tap a photo. Then: swipe ←/→ to navigate, drag or swipe ↓ to dismiss,
+     double-tap or pinch to zoom, pan while zoomed, tap to hide the chrome,
+     press the hardware back button to close. Rotate the phone while zoomed
+     to check the pan re-clamps.</p>
+
+  <section>
+    <h2>Looping gallery — captions, mixed orientations, one broken image</h2>
+    <p>Slide 4 points at a dead host and should show the inline error.
+       Slide 1 carries a <code>data-srcset</code>.</p>
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <section>
+    <h2>Single image — no counter, no arrows</h2>
+    <div class="single">
+      <img id="solo" src="https://picsum.photos/id/237/900/900" alt="A dog" />
+    </div>
+  </section>
+
+  <section>
+    <h2>Figures with figcaptions — no loop, rubber-bands at the ends</h2>
+    <div class="figures" id="figures"></div>
+  </section>
+
+  <section>
+    <h2>Event log</h2>
+    <div id="log"></div>
+  </section>
+
+  <script type="module">
+    import { LensLite } from '../dist/index.js'
+
+    const log = document.getElementById('log')
+    const watch = (name, box) => {
+      for (const event of ['open', 'close', 'change', 'error']) {
+        box.on(event, (index) => {
+          log.textContent += `${name}: ${event} (index ${index})\n`
+          log.scrollTop = log.scrollHeight
+        })
+      }
+      return box
+    }
+
+    // Looping main gallery: portrait and landscape mixed, captioned, with
+    // one guaranteed-broken slide to exercise the error state.
+    const photos = [
+      { id: 10, w: 1200, h: 800, caption: 'Forest road (landscape)' },
+      { id: 20, w: 800, h: 1200, caption: 'Shoreline (portrait)' },
+      { id: 30, w: 1200, h: 800, caption: 'Mug on a table' },
+      { broken: true, caption: 'This one is broken on purpose' },
+      { id: 50, w: 1600, h: 900, caption: 'Wide field (16:9)' },
+      { id: 60, w: 900, h: 1600, caption: 'Workbench (tall 9:16)' },
+      { id: 70, w: 1200, h: 800 }, // no caption: the bar should hide
+      { id: 80, w: 800, h: 1200, caption: 'Greenhouse (portrait)' },
+      { id: 90, w: 1200, h: 800, caption: 'Sunset haze' },
+    ]
+    const grid = document.getElementById('grid')
+    photos.forEach((photo, i) => {
+      const anchor = document.createElement('a')
+      anchor.href = photo.broken
+        ? 'https://broken.invalid/missing.jpg'
+        : `https://picsum.photos/id/${photo.id}/${photo.w}/${photo.h}`
+      if (photo.caption) anchor.dataset.caption = photo.caption
+      if (i === 0) {
+        anchor.dataset.srcset = [
+          `https://picsum.photos/id/${photo.id}/600/400 600w`,
+          `https://picsum.photos/id/${photo.id}/1200/800 1200w`,
+          `https://picsum.photos/id/${photo.id}/2400/1600 2400w`,
+        ].join(', ')
+        anchor.dataset.sizes = '100vw'
+      }
+      const thumb = document.createElement('img')
+      thumb.src = photo.broken
+        ? 'https://broken.invalid/missing-thumb.jpg'
+        : `https://picsum.photos/id/${photo.id}/300/300`
+      thumb.alt = photo.caption ?? `Sample photo ${i + 1}`
+      anchor.appendChild(thumb)
+      grid.appendChild(anchor)
+    })
+    watch('loop', LensLite.from('#grid a', { loop: true }))
+
+    // Single image: chrome should hide the counter and both arrows.
+    watch('single', LensLite.from('#solo'))
+
+    // Figures: captions come from the figcaptions; no loop, so dragging
+    // past either end rubber-bands instead of navigating.
+    const figures = document.getElementById('figures')
+    for (const [id, text] of [[100, 'First'], [110, 'Second'], [120, 'Third']]) {
+      const figure = document.createElement('figure')
+      const img = document.createElement('img')
+      img.src = `https://picsum.photos/id/${id}/1000/700`
+      img.alt = text
+      const cap = document.createElement('figcaption')
+      cap.textContent = text
+      figure.append(img, cap)
+      figures.appendChild(figure)
+    }
+    watch('figures', LensLite.from('#figures figure'))
+  </script>
+</body>
+</html>
