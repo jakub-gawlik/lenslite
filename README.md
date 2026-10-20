@@ -4,8 +4,21 @@
   <img src="./assets/logo.jpg" width="256" alt="logo">
 </p>
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/lenslite"><img src="https://img.shields.io/npm/v/lenslite" alt="npm version"></a>
+  <a href="https://bundlejs.com/?q=lenslite"><img src="https://img.shields.io/bundlejs/size/lenslite" alt="bundle size"></a>
+  <a href="https://github.com/jakub-gawlik/lenslite/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="coverage 100%"></a>
+  <a href="https://github.com/jakub-gawlik/lenslite/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/jakub-gawlik/lenslite/ci.yml?branch=main" alt="CI status"></a>
+</p>
+
 A mobile-first, dependency-free lightbox gallery in TypeScript. All gestures
-supported from day one, 100% typed, 100% tested.
+supported from day one, 100% typed, 100% tested, about 5 kB brotlied.
+
+**[Live demo and docs at lenslite.art](https://lenslite.art)**
+
+<p align="center">
+  <img src="./assets/gestures.gif" width="280" alt="Swiping, double-tap zoom, panning, pinching and dragging to dismiss">
+</p>
 
 ## Gestures
 
@@ -31,6 +44,26 @@ again. Pass `history: false` to opt out.
 Adjacent images are rendered on off-screen slides, so they are preloaded before
 you navigate to them. On viewport resize or device rotation the zoom pan is
 re-clamped to the new frame.
+
+## Install
+
+```sh
+npm install lenslite
+```
+
+Or without a build step, from a CDN. The IIFE build exposes a `lenslite`
+global:
+
+```html
+<script src="https://cdn.jsdelivr.net/npm/lenslite/dist/lenslite.min.js"></script>
+<script>
+  lenslite.LensLite.from("a[data-gallery]");
+</script>
+```
+
+Styles are injected automatically on first open. The same stylesheet is also
+published as `lenslite/lenslite.css` (`dist/lenslite.css` on the CDN) for
+pages whose Content-Security-Policy blocks inline styles.
 
 ## Usage
 
@@ -84,7 +117,7 @@ message on that slide and emits the `error` event with the failed item's index
 (neighboring slides preload, so this can fire for an image you are not looking
 at yet).
 
-Styles are injected automatically on first open. The `GestureController`
+The `GestureController`
 (Pointer Events → tap / double-tap / pan / swipe / pinch) is exported on its own
 if you want to build something else with it.
 
@@ -92,11 +125,29 @@ if you want to build something else with it.
 
 ```sh
 npm install
-npm test               # run the suite
+npm test               # unit tests (Vitest + jsdom)
 npm run test:coverage  # enforces 100% lines/branches/functions/statements
+npm run test:e2e       # Playwright: Chromium, Firefox, WebKit, Pixel 7, iPhone 14
 npm run typecheck
-npm run build          # emits ESM + d.ts to dist/
+npm run build          # dist/: minified ESM, IIFE, lenslite.css, .d.ts
+npm run size           # checks the bundles against .size-limit.json
 ```
 
-To try the demo: `npm run build`, then serve the repo root (for example
-`npx serve .`) and open `/demo/`.
+The first `test:e2e` run needs the browsers: `npx playwright install`. The
+real-browser suite covers what jsdom cannot: gestures, layout-dependent pan
+clamping, resize re-clamping and the history integration.
+
+Bundle size is a feature: CI fails when a bundle grows past its budget in
+`.size-limit.json`. Raise a budget only on purpose.
+
+### Releasing
+
+Releases go through [Changesets](https://github.com/changesets/changesets).
+Add a changeset to every user-facing PR with `npx changeset`. On `main`, the
+Release workflow keeps a "Version Packages" PR up to date; merging it publishes
+to npm with provenance, tags `vX.Y.Z`, creates a GitHub release and updates
+`CHANGELOG.md`. Publishing needs an `NPM_TOKEN` repository secret.
+
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for planned work and where the project is heading.

@@ -3,6 +3,8 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   test: {
     globals: true,
+    // e2e/ holds the Playwright suite, which runs in real browsers.
+    include: ['test/**/*.test.ts'],
     environment: 'jsdom',
     setupFiles: ['test/setup.ts'],
     coverage: {
