@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+### Patch Changes
+
+- [`866bc08`](https://github.com/jakub-gawlik/lenslite/commit/866bc08d42eba3dc56d8b9d12ed6a85ca89b56f1) Thanks [@jakub-gawlik](https://github.com/jakub-gawlik)! - Trigger the v0.2.0 release
+
 ## 0.2.0
 
 ### Minor Changes
