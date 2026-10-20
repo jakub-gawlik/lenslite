@@ -1,3 +1,6 @@
+/** Duration of the slide/snap-back animation in ms; drives the track CSS. */
+export const SLIDE_MS = 300
+
 export const CSS = `
 .lenslite {
   position: fixed;
@@ -39,7 +42,7 @@ export const CSS = `
   will-change: transform;
 }
 .lenslite__track--animating {
-  transition: transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
+  transition: transform ${SLIDE_MS}ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 .lenslite__slide {
   position: absolute;

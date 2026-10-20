@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 import {
   caption,
   centerImg,
@@ -8,6 +8,7 @@ import {
   drag,
   imgTransform,
   openAt,
+  panBounds,
   pinch,
   root,
   SLIDE_MS,
@@ -45,11 +46,40 @@ test.describe('opening and closing', () => {
   })
 })
 
+test.describe('page integration', () => {
+  test('the page behind is inert while open and restored after', async ({ page }) => {
+    await openAt(page, 0)
+    await expect(page.locator('#grid')).toHaveAttribute('inert', '')
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#grid')).not.toHaveAttribute('inert')
+  })
+
+  test('thumbnails added after setup open in the gallery', async ({ page }) => {
+    await page.goto('/e2e/fixture.html')
+    await page.evaluate(() => {
+      const a = document.createElement('a')
+      a.href = (document.querySelector('#grid a') as HTMLAnchorElement).href
+      a.dataset.caption = 'Late'
+      a.textContent = 'late'
+      a.id = 'late'
+      document.getElementById('grid')!.appendChild(a)
+    })
+    await page.locator('#late').click()
+    await expect(counter(page)).toHaveText('4 / 4')
+    await expect(caption(page)).toHaveText('Late')
+  })
+})
+
 test.describe('navigation', () => {
   test('arrow keys move between images', async ({ page }) => {
     await openAt(page, 0)
     await page.keyboard.press('ArrowRight')
     await expect(counter(page)).toHaveText('2 / 3')
+    // The bundled stylesheet times the slide with the same SLIDE_MS.
+    await expect(page.locator('.lenslite__track')).toHaveCSS(
+      'transition-duration',
+      `${SLIDE_MS / 1000}s`,
+    )
     await page.waitForTimeout(SLIDE_MS + 50)
     await page.keyboard.press('ArrowLeft')
     await expect(counter(page)).toHaveText('1 / 3')
@@ -80,7 +110,10 @@ test.describe('navigation', () => {
     )
     await page.waitForTimeout(SLIDE_MS + 50)
     await expect(counter(page)).toHaveText('2 / 3')
-    await expect(page.locator('.lenslite__track')).toHaveCSS('transform', /matrix\(1, 0, 0, 1, 0, 0\)|none/)
+    await expect(page.locator('.lenslite__track')).toHaveCSS(
+      'transform',
+      /matrix\(1, 0, 0, 1, 0, 0\)|none/,
+    )
   })
 
   test('dragging past the last image rubber-bands without looping', async ({ page }) => {
@@ -139,23 +172,44 @@ test.describe('zoom and pan', () => {
     await doubleTap(page, point)
     const zoomed = await imgTransform(page)
     expect(zoomed.scale).toBe(2.5)
-    // Zooming towards a point left of / above center pans right / down.
-    expect(zoomed.x).toBeCloseTo(40 * 1.5, 0)
-    expect(zoomed.y).toBeCloseTo(30 * 1.5, 0)
+    // Zooming towards a point left of / above center pans right / down,
+    // within the image's pan bounds (a letterboxed axis stays centered).
+    const bounds = await panBounds(page, 2.5)
+    expect(zoomed.x).toBeCloseTo(Math.min(40 * 1.5, bounds.x), 0)
+    expect(zoomed.y).toBeCloseTo(Math.min(30 * 1.5, bounds.y), 0)
     await page.waitForTimeout(400)
     await doubleTap(page, point)
     expect(await imgTransform(page)).toEqual({ x: 0, y: 0, scale: 1 })
   })
 
-  test('panning while zoomed is clamped to the real stage size', async ({ page }) => {
+  test('panning while zoomed is clamped to the fitted image box', async ({ page }) => {
     await openAt(page, 0)
     const { width, height } = await stageSize(page)
     expect(width).toBeGreaterThan(0)
     await doubleTap(page, { x: width / 2, y: height / 2 })
     await panToBottomRight(page)
     const { x, y, scale } = await imgTransform(page)
-    expect(x).toBeCloseTo((width * (scale - 1)) / 2, 0)
-    expect(y).toBeCloseTo((height * (scale - 1)) / 2, 0)
+    const bounds = await panBounds(page, scale)
+    expect(x).toBeCloseTo(bounds.x, 0)
+    expect(y).toBeCloseTo(bounds.y, 0)
+  })
+
+  test('a letterboxed image stays centered on its short axis', async ({ page }) => {
+    await page.goto('/e2e/fixture.html')
+    const portraitViewport = await page.evaluate(() => innerHeight > innerWidth)
+    // A landscape photo letterboxes on a portrait screen and vice versa.
+    await openAt(page, portraitViewport ? 0 : 1)
+    const { width, height } = await stageSize(page)
+    await doubleTap(page, { x: width / 2, y: height / 2 })
+    const bounds = await panBounds(page, 2.5)
+    expect(portraitViewport ? bounds.y : bounds.x).toBe(0)
+    await panToBottomRight(page)
+    const { x, y } = await imgTransform(page)
+    expect(portraitViewport ? y : x).toBe(0)
+    expect(portraitViewport ? x : y).toBeCloseTo(
+      portraitViewport ? bounds.x : bounds.y,
+      0,
+    )
   })
 
   test('a viewport resize re-clamps the pan to the new stage', async ({ page }) => {
@@ -163,7 +217,9 @@ test.describe('zoom and pan', () => {
     const before = await stageSize(page)
     await doubleTap(page, { x: before.width / 2, y: before.height / 2 })
     await panToBottomRight(page)
-    expect((await imgTransform(page)).x).toBeCloseTo((before.width * 1.5) / 2, 0)
+    const clamped = await panBounds(page, 2.5)
+    expect(clamped.x).toBeGreaterThan(0)
+    expect((await imgTransform(page)).x).toBeCloseTo(clamped.x, 0)
 
     await page.setViewportSize({
       width: Math.round(before.width / 2),
@@ -172,12 +228,22 @@ test.describe('zoom and pan', () => {
     await expect
       .poll(async () => (await stageSize(page)).width)
       .toBeLessThan(before.width)
-    const after = await stageSize(page)
-    await expect.poll(async () => (await imgTransform(page)).x).toBeCloseTo(
-      (after.width * 1.5) / 2,
-      0,
-    )
-    expect((await imgTransform(page)).y).toBeCloseTo((after.height * 1.5) / 2, 0)
+    const after = await panBounds(page, 2.5)
+    expect(after.x).toBeLessThan(clamped.x)
+    await expect.poll(async () => (await imgTransform(page)).x).toBeCloseTo(after.x, 0)
+    expect((await imgTransform(page)).y).toBeCloseTo(after.y, 0)
+  })
+
+  test('Escape zooms out first, then closes', async ({ page }) => {
+    await openAt(page, 0)
+    const { width, height } = await stageSize(page)
+    await doubleTap(page, { x: width / 2, y: height / 2 })
+    expect((await imgTransform(page)).scale).toBe(2.5)
+    await page.keyboard.press('Escape')
+    await expect(root(page)).toBeVisible()
+    expect(await imgTransform(page)).toEqual({ x: 0, y: 0, scale: 1 })
+    await page.keyboard.press('Escape')
+    await expect(root(page)).toHaveCount(0)
   })
 
   test('pinch zooms in, clamped at maxZoom, and pinching back resets', async ({
@@ -224,15 +290,15 @@ test.describe('dismissal', () => {
 })
 
 test.describe('history', () => {
-  test('the back button closes the viewer without leaving the page', async ({
-    page,
-  }) => {
+  test('the back button closes the viewer without leaving the page', async ({ page }) => {
     await openAt(page, 0)
     const url = page.url()
     await page.goBack()
     await expect(root(page)).toHaveCount(0)
     expect(page.url()).toBe(url)
-    expect(await page.evaluate(() => (window as unknown as { events: string[] }).events)).toContain('close:0')
+    expect(
+      await page.evaluate(() => (window as unknown as { events: string[] }).events),
+    ).toContain('close:0')
   })
 
   test('closing from the UI removes the history entry it pushed', async ({ page }) => {
@@ -244,6 +310,27 @@ test.describe('history', () => {
     await expect.poll(() => page.evaluate(() => history.state)).toBeNull()
     await page.goBack()
     await expect(page).toHaveURL(/iife\.html/)
+  })
+
+  test('reopening right after a UI close survives the late popstate', async ({
+    page,
+  }) => {
+    await openAt(page, 0)
+    const url = page.url()
+    // Close and reopen in the same task, before history.back() lands.
+    await page.evaluate(() => {
+      const box = (window as unknown as { box: { close(): void; open(i: number): void } })
+        .box
+      box.close()
+      box.open(1)
+    })
+    await page.waitForTimeout(500)
+    await expect(root(page)).toBeVisible()
+    await expect(counter(page)).toHaveText('2 / 3')
+    // The reopened viewer owns a fresh entry: back closes it, page stays.
+    await page.goBack()
+    await expect(root(page)).toHaveCount(0)
+    expect(page.url()).toBe(url)
   })
 
   test('history: false leaves the history stack alone', async ({ page }) => {

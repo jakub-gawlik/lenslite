@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { MockInstance } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { LensLite } from '../src/index.js'
 import type { LensLiteItem } from '../src/types.js'
 import { cancel, down, drag, move, tap, up } from './helpers.js'
@@ -13,14 +13,16 @@ const ITEMS: LensLiteItem[] = [
 /** Duration of the slide/snap-back animation. */
 const SLIDE_MS = 300
 
-const slidesOf = (el: HTMLElement): HTMLElement[] =>
-  [...el.querySelectorAll<HTMLElement>('.lenslite__slide')]
+const slidesOf = (el: HTMLElement): HTMLElement[] => [
+  ...el.querySelectorAll<HTMLElement>('.lenslite__slide'),
+]
 const centerSlide = (el: HTMLElement): HTMLElement =>
   slidesOf(el).find((s) => s.style.left === '0%') as HTMLElement
 const centerImg = (el: HTMLElement): HTMLImageElement =>
   centerSlide(el).querySelector('.lenslite__img') as HTMLImageElement
-const imgsOf = (el: HTMLElement): HTMLImageElement[] =>
-  [...el.querySelectorAll<HTMLImageElement>('.lenslite__img')]
+const imgsOf = (el: HTMLElement): HTMLImageElement[] => [
+  ...el.querySelectorAll<HTMLImageElement>('.lenslite__img'),
+]
 
 describe('LensLite', () => {
   let box: LensLite
@@ -33,11 +35,14 @@ describe('LensLite', () => {
     document.head.innerHTML = ''
     document.body.innerHTML = ''
     document.body.style.overflow = ''
+    document.body.style.paddingRight = ''
     box = new LensLite({ items: ITEMS })
   })
 
   afterEach(() => {
     box.destroy()
+    // Drop scrollbar-width mocks so they don't leak into later tests.
+    Reflect.deleteProperty(document.documentElement, 'clientWidth')
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
     vi.useRealTimers()
@@ -49,17 +54,28 @@ describe('LensLite', () => {
     centerSlide(root()).querySelector('.lenslite__error') as HTMLElement
   const spinner = (): HTMLElement =>
     centerSlide(root()).querySelector('.lenslite__spinner') as HTMLElement
-  const track = (): HTMLElement =>
-    root().querySelector('.lenslite__track') as HTMLElement
+  const track = (): HTMLElement => root().querySelector('.lenslite__track') as HTMLElement
   const settle = (): void => {
     vi.advanceTimersByTime(SLIDE_MS)
   }
 
-  /** The stage with mocked layout, since jsdom computes no sizes. */
+  /** Mocks the rendered (untransformed) size of every slide image. */
+  const imageSize = (width: number, height: number): void => {
+    for (const el of imgsOf(root())) {
+      Object.defineProperty(el, 'offsetWidth', { value: width, configurable: true })
+      Object.defineProperty(el, 'offsetHeight', { value: height, configurable: true })
+    }
+  }
+
+  /**
+   * The stage with mocked layout, since jsdom computes no sizes. Images fill
+   * the stage unless a test letterboxes them with imageSize().
+   */
   const stage = (): HTMLElement => {
     const el = root().querySelector('.lenslite__stage') as HTMLElement
     Object.defineProperty(el, 'clientWidth', { value: 400, configurable: true })
     Object.defineProperty(el, 'clientHeight', { value: 600, configurable: true })
+    imageSize(400, 600)
     return el
   }
 
@@ -117,6 +133,43 @@ describe('LensLite', () => {
       expect(document.body.style.overflow).toBe('')
     })
 
+    it('restores the original body overflow and pads for the scrollbar', () => {
+      Object.defineProperty(document.documentElement, 'clientWidth', {
+        value: window.innerWidth - 15,
+        configurable: true,
+      })
+      document.body.style.overflow = 'scroll'
+      document.body.style.paddingRight = '5px'
+      box.open()
+      expect(document.body.style.overflow).toBe('hidden')
+      // The existing padding plus the 15px the scrollbar took.
+      expect(document.body.style.paddingRight).toBe('20px')
+      box.close()
+      expect(document.body.style.overflow).toBe('scroll')
+      expect(document.body.style.paddingRight).toBe('5px')
+    })
+
+    it('adds no padding when the page has no scrollbar', () => {
+      Object.defineProperty(document.documentElement, 'clientWidth', {
+        value: window.innerWidth,
+        configurable: true,
+      })
+      box.open()
+      expect(document.body.style.paddingRight).toBe('')
+    })
+
+    it('makes the rest of the page inert while open', () => {
+      document.body.innerHTML = '<main></main><aside inert></aside>'
+      const [main, aside] = [...document.body.children]
+      box.open()
+      expect(main!.hasAttribute('inert')).toBe(true)
+      expect(root().hasAttribute('inert')).toBe(false)
+      box.close()
+      expect(main!.hasAttribute('inert')).toBe(false)
+      // Already inert before opening, so left alone.
+      expect(aside!.hasAttribute('inert')).toBe(true)
+    })
+
     it('close is a no-op when not open', () => {
       expect(() => box.close()).not.toThrow()
     })
@@ -172,11 +225,9 @@ describe('LensLite', () => {
     it('preloads across the loop boundary', () => {
       const looping = new LensLite({ items: ITEMS, loop: true })
       looping.open(0)
-      expect(imgsOf(looping.element as HTMLElement).map((i) => i.getAttribute('src'))).toEqual([
-        'c.jpg',
-        'a.jpg',
-        'b.jpg',
-      ])
+      expect(
+        imgsOf(looping.element as HTMLElement).map((i) => i.getAttribute('src')),
+      ).toEqual(['c.jpg', 'a.jpg', 'b.jpg'])
       looping.destroy()
     })
   })
@@ -292,6 +343,24 @@ describe('LensLite', () => {
       settle()
       press('a')
       expect(box.index).toBe(0)
+      press('Escape')
+      expect(box.isOpen).toBe(false)
+    })
+
+    it('zooms out on the first Escape while zoomed, closes on the second', () => {
+      box.open()
+      const s = stage()
+      tap(s, 1, 200, 300)
+      tap(s, 1, 200, 300)
+      down(s, 2, 200, 300)
+      move(s, 2, 150, 300)
+      vi.advanceTimersByTime(100)
+      up(s, 2, 150, 300)
+      expect(img().classList.contains('lenslite__img--glide')).toBe(true)
+      press('Escape')
+      expect(box.isOpen).toBe(true)
+      expect(img().classList.contains('lenslite__img--glide')).toBe(false)
+      expect(img().style.transform).toBe('translate(0px, 0px) scale(1)')
       press('Escape')
       expect(box.isOpen).toBe(false)
     })
@@ -572,6 +641,22 @@ describe('LensLite', () => {
       expect(box.isOpen).toBe(true)
     })
 
+    it('clamps the pan to the fitted image box, not the stage', () => {
+      box.open()
+      const s = stage()
+      // A landscape image letterboxed in the portrait stage: 400x200.
+      imageSize(400, 200)
+      tap(s, 1, 200, 300)
+      tap(s, 1, 200, 300)
+      down(s, 2, 200, 300)
+      move(s, 2, 900, 900)
+      // Zoomed 2.5x the image is 1000x500: 300px of horizontal play, while
+      // vertically it still fits inside the 600px stage and stays centered.
+      expect(img().style.transform).toBe('translate(300px, 0px) scale(2.5)')
+      vi.advanceTimersByTime(1000)
+      up(s, 2, 900, 900)
+    })
+
     it('glides with momentum after a pan while zoomed', () => {
       box.open()
       const s = stage()
@@ -627,6 +712,20 @@ describe('LensLite', () => {
       vi.advanceTimersByTime(1000)
       up(s, 1, 200, 500)
       expect(box.isOpen).toBe(false)
+    })
+
+    it('does not dismiss on a vertical flick of a drag locked horizontally', () => {
+      box.open(2)
+      const s = stage()
+      // At the last image the horizontal drag only rubber-bands, then the
+      // finger flicks down: the release is a "down" swipe of an x-locked drag.
+      down(s, 1, 200, 300)
+      move(s, 1, 180, 300)
+      move(s, 1, 180, 340)
+      up(s, 1, 180, 340)
+      settle()
+      expect(box.isOpen).toBe(true)
+      expect(box.index).toBe(2)
     })
 
     it('handles a fast long drag down: dismissal wins over the swipe', () => {
@@ -719,8 +818,7 @@ describe('LensLite', () => {
     const el = (): HTMLDivElement => rich.element as HTMLDivElement
     const captionOf = (): HTMLElement =>
       el().querySelector('.lenslite__caption') as HTMLElement
-    const liveOf = (): HTMLElement =>
-      el().querySelector('.lenslite__live') as HTMLElement
+    const liveOf = (): HTMLElement => el().querySelector('.lenslite__live') as HTMLElement
 
     it('shows the caption for the current item and hides it otherwise', () => {
       rich.open(0)
@@ -776,6 +874,36 @@ describe('LensLite', () => {
       expect(backSpy).toHaveBeenCalledTimes(1)
     })
 
+    it('ignores the late popstate of a UI close when reopened right away', () => {
+      const push = vi.spyOn(history, 'pushState')
+      box.open()
+      box.close()
+      box.open()
+      // The entry is only pushed once the pending back traversal lands.
+      expect(push).toHaveBeenCalledTimes(1)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      expect(box.isOpen).toBe(true)
+      expect(push).toHaveBeenCalledTimes(2)
+      // The reopened session owns the new entry: back closes it as usual.
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      expect(box.isOpen).toBe(false)
+      expect(backSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('does not push an entry if closed again before the back lands', () => {
+      const push = vi.spyOn(history, 'pushState')
+      box.open()
+      box.close()
+      box.open()
+      box.close()
+      expect(backSpy).toHaveBeenCalledTimes(1)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+      expect(push).toHaveBeenCalledTimes(1)
+      // Back to normal afterwards.
+      box.open()
+      expect(push).toHaveBeenCalledTimes(2)
+    })
+
     it('can be turned off with the history option', () => {
       const push = vi.spyOn(history, 'pushState')
       const plain = new LensLite({ items: ITEMS, history: false })
@@ -800,6 +928,7 @@ describe('LensLite', () => {
       expect(img().style.transform).toBe('translate(300px, 0px) scale(2.5)')
       // Rotating to a narrower viewport halves the horizontal play.
       Object.defineProperty(s, 'clientWidth', { value: 200, configurable: true })
+      imageSize(200, 600)
       window.dispatchEvent(new Event('resize'))
       expect(img().style.transform).toBe('translate(150px, 0px) scale(2.5)')
       expect(track().style.transform).toBe('translateX(0px)')
@@ -873,9 +1002,7 @@ describe('LensLite', () => {
       gallery.open(0)
       const el = gallery.element as HTMLElement
       const captionEl = el.querySelector('.lenslite__caption') as HTMLElement
-      expect(centerImg(el).getAttribute('srcset')).toBe(
-        'big-1.jpg 1x, big-1@2x.jpg 2x',
-      )
+      expect(centerImg(el).getAttribute('srcset')).toBe('big-1.jpg 1x, big-1@2x.jpg 2x')
       expect(centerImg(el).getAttribute('sizes')).toBe('100vw')
       expect(captionEl.textContent).toBe('Cap one')
       gallery.next()
@@ -917,7 +1044,9 @@ describe('LensLite', () => {
     it('builds items from bare images', () => {
       document.body.innerHTML = '<img class="pic" src="x.jpg" alt="X">'
       const gallery = LensLite.from('.pic')
-      document.querySelector('.pic')!.dispatchEvent(new MouseEvent('click'))
+      document
+        .querySelector('.pic')!
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
       expect(gallery.isOpen).toBe(true)
       const current = centerImg(gallery.element as HTMLElement)
       expect(current.getAttribute('src')).toBe('x.jpg')
@@ -928,9 +1057,61 @@ describe('LensLite', () => {
     it('builds items from containers holding an image', () => {
       document.body.innerHTML = '<figure><img src="f.jpg" alt="F"></figure>'
       const gallery = LensLite.from('figure')
-      document.querySelector('figure')!.dispatchEvent(new MouseEvent('click'))
+      document
+        .querySelector('figure')!
+        .dispatchEvent(new MouseEvent('click', { bubbles: true }))
       expect(centerImg(gallery.element as HTMLElement).getAttribute('src')).toBe('f.jpg')
       gallery.destroy()
+    })
+
+    it('picks up thumbnails added after the gallery was built', () => {
+      document.body.innerHTML = '<div id="g"><a href="one.jpg">one</a></div>'
+      const gallery = LensLite.from('#g a')
+      const late = document.createElement('a')
+      late.href = 'two.jpg'
+      late.innerHTML = '<span>two</span>'
+      document.getElementById('g')!.appendChild(late)
+      // A click on a child of the thumbnail counts too.
+      late.firstElementChild!.dispatchEvent(
+        new MouseEvent('click', { bubbles: true, cancelable: true }),
+      )
+      expect(gallery.index).toBe(1)
+      expect(centerImg(gallery.element as HTMLElement).getAttribute('src')).toBe(
+        'two.jpg',
+      )
+      const counterEl = (gallery.element as HTMLElement).querySelector(
+        '.lenslite__counter',
+      )
+      expect(counterEl?.textContent).toBe('2 / 2')
+      gallery.destroy()
+    })
+
+    it('ignores clicks elsewhere, and on thumbnails while already open', () => {
+      document.body.innerHTML = `
+        <a href="one.jpg">one</a><a href="two.jpg">two</a><p>text</p>
+      `
+      const gallery = LensLite.from('a')
+      const click = (el: Element): MouseEvent => {
+        const event = new MouseEvent('click', { bubbles: true, cancelable: true })
+        el.dispatchEvent(event)
+        return event
+      }
+      expect(click(document.querySelector('p')!).defaultPrevented).toBe(false)
+      expect(gallery.isOpen).toBe(false)
+      click(document.querySelectorAll('a')[0]!)
+      expect(click(document.querySelectorAll('a')[1]!).defaultPrevented).toBe(false)
+      expect(gallery.index).toBe(0)
+      gallery.destroy()
+    })
+
+    it('destroy removes the click handling', () => {
+      document.body.innerHTML = '<a href="one.jpg">one</a>'
+      const gallery = LensLite.from('a')
+      gallery.destroy()
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+      document.querySelector('a')!.dispatchEvent(click)
+      expect(click.defaultPrevented).toBe(false)
+      expect(gallery.isOpen).toBe(false)
     })
 
     it('passes options through', () => {

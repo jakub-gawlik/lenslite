@@ -33,7 +33,9 @@
     "size": "size-limit",
     "changeset": "changeset",
     "release": "changeset publish",
-    "prepublishOnly": "npm run typecheck && npm run test:coverage && npm run build && npm run size"
+    "prepublishOnly": "npm run lint && npm run typecheck && npm run test:coverage && npm run build && npm run size",
+    "lint": "biome check .",
+    "format": "biome check --write ."
   },
   "keywords": [
     "lightbox",
@@ -54,6 +56,7 @@
   "bugs": "https://github.com/jakub-gawlik/lenslite/issues",
   "homepage": "https://lenslite.art",
   "devDependencies": {
+    "@biomejs/biome": "2.5.15",
     "@changesets/changelog-github": "^1.0.1",
     "@changesets/cli": "^3.0.3",
     "@playwright/test": "^1.64.1",
@@ -69,5 +72,8 @@
   "publishConfig": {
     "access": "public",
     "provenance": true
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

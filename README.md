@@ -12,7 +12,7 @@
 </p>
 
 A mobile-first, dependency-free lightbox gallery in TypeScript. All gestures
-supported from day one, 100% typed, 100% tested, about 5 kB brotlied.
+supported from day one, 100% typed, 100% tested, under 5.5 kB brotlied.
 
 **[Live demo and docs at lenslite.art](https://lenslite.art)**
 
@@ -31,9 +31,11 @@ supported from day one, 100% typed, 100% tested, about 5 kB brotlied.
 | Pan while zoomed        | Move around the image, clamped to the frame, with momentum on release                                                                               |
 | Tap                     | Toggle the chrome (buttons and counter)                                                                                                             |
 
-Keyboard works too: `←` / `→` navigate, `Escape` closes, and `Tab` cycles the
-controls without leaving the dialog. Focus moves into the dialog on open and
-returns to the previously focused element on close. A polite live region
+Keyboard works too: `←` / `→` navigate, `Escape` closes (when zoomed in, the
+first press zooms back out), and `Tab` cycles the controls without leaving the
+dialog. Focus moves into the dialog on open and returns to the previously
+focused element on close, and the rest of the page is made `inert` while the
+viewer is open. A polite live region
 announces each image ("Image 2 of 9: …") to screen readers, and all transitions
 are disabled under `prefers-reduced-motion`.
 
@@ -57,7 +59,7 @@ global:
 ```html
 <script src="https://cdn.jsdelivr.net/npm/lenslite/dist/lenslite.min.js"></script>
 <script>
-  lenslite.LensLite.from("a[data-gallery]");
+  lenslite.LensLite.from('a[data-gallery]')
 </script>
 ```
 
@@ -68,15 +70,15 @@ pages whose Content-Security-Policy blocks inline styles.
 ## Usage
 
 ```ts
-import { LensLite } from "lenslite";
+import { LensLite } from 'lenslite'
 
 const box = new LensLite({
   items: [
-    { src: "/photos/one.jpg", alt: "One", caption: "Day one" },
+    { src: '/photos/one.jpg', alt: 'One', caption: 'Day one' },
     {
-      src: "/photos/two.jpg",
-      srcset: "/photos/two-800.jpg 800w, /photos/two-1600.jpg 1600w",
-      sizes: "100vw",
+      src: '/photos/two.jpg',
+      srcset: '/photos/two-800.jpg 800w, /photos/two-1600.jpg 1600w',
+      sizes: '100vw',
     },
   ],
   loop: true, // wrap around at the ends (default false)
@@ -84,13 +86,13 @@ const box = new LensLite({
   doubleTapZoom: 2.5,
   dismissThreshold: 100, // px of vertical drag that dismisses
   history: true, // back button closes the viewer (default true)
-});
+})
 
-box.open(0);
+box.open(0)
 
-box.on("change", (index) => console.log("now showing", index));
-box.on("error", (index) => console.log("image failed to load", index));
-box.on("close", () => console.log("closed"));
+box.on('change', (index) => console.log('now showing', index))
+box.on('error', (index) => console.log('image failed to load', index))
+box.on('close', () => console.log('closed'))
 ```
 
 ### Binding to existing markup
@@ -104,12 +106,17 @@ candidates come from `data-srcset` / `data-sizes`, or from the element's own
 `srcset` / `sizes` when the element itself is the image — an inner thumbnail's
 `srcset` is never used, since it lists the wrong files.
 
+Clicks are handled by a single delegated listener, and the matching elements
+are read again on every click, so thumbnails added to the page later (infinite
+scroll, client-side rendering) join the gallery without rebuilding it. Call
+`destroy()` to stop handling clicks.
+
 ```ts
-import { LensLite } from "lenslite";
+import { LensLite } from 'lenslite'
 
 // <a href="/photos/one.jpg" data-caption="Day one">
 //   <img src="/thumbs/one.jpg" alt="One"></a> …
-const box = LensLite.from("a[data-gallery]", { loop: true });
+const box = LensLite.from('a[data-gallery]', { loop: true })
 ```
 
 If an image fails to load, the viewer shows an inline "Image failed to load"

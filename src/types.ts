@@ -53,7 +53,7 @@ export interface LensLiteOptions {
   maxZoom?: number
   /** Scale applied by double-tap. Default 2.5. */
   doubleTapZoom?: number
-  /** Dragging down further than this (px) at scale 1 dismisses. Default 100. */
+  /** Dragging up or down further than this (px) at scale 1 dismisses. Default 100. */
   dismissThreshold?: number
   /**
    * Push a history entry on open so the browser's back button closes the

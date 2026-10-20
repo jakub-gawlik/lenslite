@@ -1,5 +1,5 @@
-import { expect } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
+import { expect } from '@playwright/test'
 
 export interface Point {
   x: number
@@ -31,6 +31,20 @@ export async function stageSize(page: Page): Promise<{ width: number; height: nu
     width: el.clientWidth,
     height: el.clientHeight,
   }))
+}
+
+/**
+ * How far the center image can pan at `scale`, measured from the real
+ * layout: until the edge of its fitted box meets the stage edge.
+ */
+export async function panBounds(page: Page, scale: number): Promise<Point> {
+  return centerImg(page).evaluate((img: HTMLImageElement, scale) => {
+    const stage = img.closest('.lenslite__stage') as HTMLElement
+    return {
+      x: Math.max(0, (img.offsetWidth * scale - stage.clientWidth) / 2),
+      y: Math.max(0, (img.offsetHeight * scale - stage.clientHeight) / 2),
+    }
+  }, scale)
 }
 
 /** Pan offset and scale of the center image, parsed from its inline transform. */

@@ -21,9 +21,18 @@ const minifyStyles = {
       const source = await readFile(args.path, 'utf8')
       const match = CSS_LITERAL.exec(source)
       if (!match) throw new Error('minify-styles: CSS literal not found')
-      const css = await minifyCss(match[1])
+      // Swap ${...} interpolations for placeholder identifiers the CSS
+      // minifier leaves alone, then put them back into a template literal.
+      const exprs = []
+      const css = await minifyCss(
+        match[1].replace(
+          /\$\{([^}]*)\}/g,
+          (_, expr) => `__expr${exprs.push(expr) - 1}__`,
+        ),
+      )
+      const literal = css.replace(/__expr(\d+)__/g, (_, i) => `\${${exprs[i]}}`)
       return {
-        contents: source.replace(match[0], `export const CSS = ${JSON.stringify(css)}`),
+        contents: source.replace(match[0], `export const CSS = \`${literal}\``),
         loader: 'ts',
       }
     })

@@ -46,9 +46,7 @@ describe('GestureController', () => {
       tap(el, 1, 100, 100)
       vi.advanceTimersByTime(100)
       tap(el, 2, 105, 102)
-      expect(events).toEqual([
-        { type: 'double-tap', point: { x: 105, y: 102 } },
-      ])
+      expect(events).toEqual([{ type: 'double-tap', point: { x: 105, y: 102 } }])
       vi.advanceTimersByTime(1000)
       expect(events).toHaveLength(1)
     })

@@ -3,18 +3,18 @@
     "name": "ESM, full import",
     "path": "dist/index.js",
     "import": "*",
-    "limit": "5.2 kB"
+    "limit": "5.5 kB"
   },
   {
     "name": "ESM, { LensLite }",
     "path": "dist/index.js",
     "import": "{ LensLite }",
-    "limit": "5.1 kB"
+    "limit": "5.4 kB"
   },
   {
     "name": "IIFE (lenslite.min.js)",
     "path": "dist/lenslite.min.js",
-    "limit": "5.4 kB",
+    "limit": "5.7 kB",
     "rolldown": false
   },
   {
