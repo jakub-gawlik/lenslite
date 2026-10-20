@@ -150,10 +150,12 @@ Bundle size is a feature: CI fails when a bundle grows past its budget in
 ### Releasing
 
 Releases go through [Changesets](https://github.com/changesets/changesets).
-Add a changeset to every user-facing PR with `npx changeset`. On `main`, the
-Release workflow keeps a "Version Packages" PR up to date; merging it publishes
-to npm with provenance, tags `vX.Y.Z`, creates a GitHub release and updates
-`CHANGELOG.md`. Publishing needs an `NPM_TOKEN` repository secret.
+Add a changeset to every user-facing PR with `npx changeset`. Once CI passes
+on `main`, the Release workflow keeps a "Version Packages" PR up to date;
+merging it publishes to npm with provenance, tags `vX.Y.Z`, creates a GitHub
+release and updates `CHANGELOG.md`. Publishing uses npm trusted publishing
+(configure `release.yml` as the trusted publisher on npmjs.com), or an
+`NPM_TOKEN` repository secret as a fallback.
 
 ## Roadmap
 
