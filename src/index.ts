@@ -1,5 +1,5 @@
-export { LensLite } from './lenslite.js'
 export { GestureController } from './gestures.js'
+export { LensLite } from './lenslite.js'
 export { CSS, injectStyles } from './styles.js'
 export type {
   GestureEvent,

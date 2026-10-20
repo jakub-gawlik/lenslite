@@ -1,5 +1,5 @@
 import { GestureController } from './gestures.js'
-import { injectStyles } from './styles.js'
+import { injectStyles, SLIDE_MS } from './styles.js'
 import type {
   GestureEvent,
   LensLiteEventName,
@@ -28,8 +28,6 @@ const DEFAULTS: Defaults = {
 
 /** How many ms of the release velocity a pan keeps gliding after letting go. */
 const GLIDE_MOMENTUM = 150
-/** Duration of the slide/snap-back animation; must match the track CSS. */
-const SLIDE_MS = 300
 /** Fraction of the stage width a drag must cover to commit to a navigation. */
 const SLIDE_FRACTION = 0.25
 /** Release velocity in px/ms that commits a shorter drag to a navigation. */
@@ -94,7 +92,7 @@ const itemFrom = (el: HTMLElement): LensLiteItem => {
  * the controls without leaving the dialog. Adjacent images are preloaded.
  */
 export class LensLite {
-  private readonly items: readonly LensLiteItem[]
+  private items: readonly LensLiteItem[]
   private readonly opts: Defaults
   private readonly listeners: Record<LensLiteEventName, Set<LensLiteListener>> = {
     open: new Set(),
@@ -115,6 +113,18 @@ export class LensLite {
   private lastFocus: HTMLElement | null = null
   /** Whether the history entry pushed on open is still ours to pop. */
   private historyEntry = false
+  /**
+   * A UI close called history.back(), whose popstate has not arrived yet.
+   * Until it does, a reopen must not push its entry or listen for popstate,
+   * or the late event would close the new session.
+   */
+  private pendingBack = false
+  /** Body styles overridden while open, restored on close. */
+  private bodyStyle = { overflow: '', paddingRight: '' }
+  /** Page elements made inert while open; restored on close. */
+  private inerted: Element[] = []
+  /** Removes the delegated click listener installed by `LensLite.from`. */
+  private unbind: (() => void) | null = null
 
   private current = 0
   private scale = 1
@@ -123,6 +133,8 @@ export class LensLite {
   private pinchBase: number | null = null
   /** Direction a single-finger drag locked onto; null outside a drag. */
   private panAxis: 'x' | 'y' | null = null
+  /** Axis of the drag just released, for the swipe that may follow it. */
+  private releasedAxis: 'x' | 'y' | null = null
   /** Pending slide/snap-back animation; gestures are ignored while it runs. */
   private animTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -144,19 +156,27 @@ export class LensLite {
    * Builds a gallery from elements already on the page and opens it at the
    * clicked element. Each element contributes one item: an anchor's `href`,
    * an image's `src`, or the `src` of the first image inside the element.
+   *
+   * Clicks are handled by one delegated listener on the document, and the
+   * items are re-read on every click, so thumbnails added later join the
+   * gallery. `destroy()` removes the listener.
    */
-  static from(
-    selector: string,
-    options: Omit<LensLiteOptions, 'items'> = {},
-  ): LensLite {
-    const elements = [...document.querySelectorAll<HTMLElement>(selector)]
-    const box = new LensLite({ ...options, items: elements.map(itemFrom) })
-    elements.forEach((el, i) => {
-      el.addEventListener('click', (e) => {
-        e.preventDefault()
-        box.open(i)
-      })
-    })
+  static from(selector: string, options: Omit<LensLiteOptions, 'items'> = {}): LensLite {
+    const collect = (): HTMLElement[] => [
+      ...document.querySelectorAll<HTMLElement>(selector),
+    ]
+    const box = new LensLite({ ...options, items: collect().map(itemFrom) })
+    const onClick = (e: MouseEvent): void => {
+      const hit = (e.target as Element).closest(selector)
+      const elements = collect()
+      const index = elements.indexOf(hit as HTMLElement)
+      if (index < 0 || box.isOpen) return
+      e.preventDefault()
+      box.items = elements.map(itemFrom)
+      box.open(index)
+    }
+    document.addEventListener('click', onClick)
+    box.unbind = () => document.removeEventListener('click', onClick)
     return box
   }
 
@@ -192,15 +212,13 @@ export class LensLite {
     this.panAxis = null
     this.lastFocus = document.activeElement as HTMLElement | null
     this.root = this.build()
+    this.lockScroll()
+    this.inertPage()
     document.body.appendChild(this.root)
-    document.body.style.overflow = 'hidden'
     document.addEventListener('keydown', this.onKeydown)
     window.addEventListener('resize', this.onResize)
-    if (this.opts.history) {
-      this.historyEntry = true
-      history.pushState({ lenslite: true }, '')
-      window.addEventListener('popstate', this.onPopstate)
-    }
+    // While a UI close's history.back() is in flight, onBackDone takes over.
+    if (this.opts.history && !this.pendingBack) this.pushHistory()
     this.render()
     this.announce()
     this.closeBtn.focus()
@@ -220,13 +238,16 @@ export class LensLite {
     window.removeEventListener('popstate', this.onPopstate)
     this.root.remove()
     this.root = null
-    document.body.style.overflow = ''
+    this.restorePage()
     this.lastFocus?.focus()
     this.lastFocus = null
     if (this.historyEntry) {
       // Closed from the UI: take the entry pushed on open back out, so the
-      // next back press leaves the page as the user expects.
+      // next back press leaves the page as the user expects. The traversal
+      // is async; onBackDone marks its popstate as handled.
       this.historyEntry = false
+      this.pendingBack = true
+      window.addEventListener('popstate', this.onBackDone, { once: true })
       history.back()
     }
     this.emit('close')
@@ -242,10 +263,52 @@ export class LensLite {
     if (target !== null) this.slideTo(target, -1)
   }
 
-  /** Close if open and drop every registered listener. */
+  /**
+   * Close if open, drop every registered listener and, for a gallery built
+   * by `LensLite.from`, stop handling clicks on its elements.
+   */
   destroy(): void {
     this.close()
     for (const set of Object.values(this.listeners)) set.clear()
+    this.unbind?.()
+    this.unbind = null
+  }
+
+  private pushHistory(): void {
+    this.historyEntry = true
+    history.pushState({ lenslite: true }, '')
+    window.addEventListener('popstate', this.onPopstate)
+  }
+
+  /**
+   * Hides the page scrollbar, padding the body by its width so the layout
+   * behind the overlay doesn't shift.
+   */
+  private lockScroll(): void {
+    const { body, documentElement } = document
+    this.bodyStyle = {
+      overflow: body.style.overflow,
+      paddingRight: body.style.paddingRight,
+    }
+    const scrollbar = window.innerWidth - documentElement.clientWidth
+    if (scrollbar > 0) {
+      const padding = parseFloat(getComputedStyle(body).paddingRight) || 0
+      body.style.paddingRight = `${padding + scrollbar}px`
+    }
+    body.style.overflow = 'hidden'
+  }
+
+  /** Makes the rest of the page inert, so focus and clicks stay in the dialog. */
+  private inertPage(): void {
+    this.inerted = [...document.body.children].filter((el) => !el.hasAttribute('inert'))
+    for (const el of this.inerted) el.setAttribute('inert', '')
+  }
+
+  private restorePage(): void {
+    document.body.style.overflow = this.bodyStyle.overflow
+    document.body.style.paddingRight = this.bodyStyle.paddingRight
+    for (const el of this.inerted) el.removeAttribute('inert')
+    this.inerted = []
   }
 
   private emit(name: LensLiteEventName, index = this.current): void {
@@ -446,19 +509,19 @@ export class LensLite {
   }
 
   private applyTransform(): void {
-    this.img.style.transform =
-      `translate(${this.offset.x}px, ${this.offset.y}px) scale(${this.scale})`
+    this.img.style.transform = `translate(${this.offset.x}px, ${this.offset.y}px) scale(${this.scale})`
   }
 
   /**
-   * How far the image may be panned from center at the current zoom, so it
-   * can never be dragged fully out of view.
+   * How far the image may be panned from center at the current zoom: until
+   * its edge meets the stage edge. On an axis where the zoomed image still
+   * fits inside the stage (a letterboxed image) it stays centered.
    */
   private maxOffset(): Point {
-    const factor = (this.scale - 1) / 2
+    const { offsetWidth, offsetHeight } = this.img
     return {
-      x: this.stage.clientWidth * factor,
-      y: this.stage.clientHeight * factor,
+      x: Math.max(0, (offsetWidth * this.scale - this.stage.clientWidth) / 2),
+      y: Math.max(0, (offsetHeight * this.scale - this.stage.clientHeight) / 2),
     }
   }
 
@@ -481,6 +544,15 @@ export class LensLite {
   }
 
   /**
+   * The popstate from a UI close's history.back() arrived. If the viewer was
+   * reopened in the meantime, it can now push its own entry safely.
+   */
+  private onBackDone = (): void => {
+    this.pendingBack = false
+    if (this.root && this.opts.history) this.pushHistory()
+  }
+
+  /**
    * The viewport changed (rotation, keyboard, window resize): the pan clamp
    * and track positions are based on stage dimensions, so recompute them.
    */
@@ -493,7 +565,13 @@ export class LensLite {
   private onKeydown = (e: KeyboardEvent): void => {
     switch (e.key) {
       case 'Escape':
-        this.close()
+        // Zoomed in, the first Escape only zooms back out.
+        if (this.scale > 1) {
+          this.stopGlide()
+          this.resetZoom()
+        } else {
+          this.close()
+        }
         break
       case 'ArrowLeft':
         this.prev()
@@ -609,6 +687,7 @@ export class LensLite {
   private onPanEnd(totalDelta: Point, velocity: Point): void {
     const axis = this.panAxis
     this.panAxis = null
+    this.releasedAxis = axis
     if (this.scale > 1) {
       this.glide(velocity)
       return
@@ -656,8 +735,9 @@ export class LensLite {
 
   private onSwipe(direction: SwipeDirection): void {
     // Horizontal navigation is handled by the drag itself (settleTrack);
-    // only a fast vertical flick below the dismiss distance lands here.
-    if (!this.root || this.scale > 1) return
+    // only a fast flick of a drag locked vertically (and so started at rest
+    // zoom) dismisses, below the dismiss distance.
+    if (!this.root || this.releasedAxis !== 'y') return
     if (direction === 'up' || direction === 'down') this.close()
   }
 

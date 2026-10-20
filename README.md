@@ -4,8 +4,21 @@
   <img src="./assets/logo.jpg" width="256" alt="logo">
 </p>
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/lenslite"><img src="https://img.shields.io/npm/v/lenslite" alt="npm version"></a>
+  <a href="https://bundlejs.com/?q=lenslite"><img src="https://img.shields.io/bundlejs/size/lenslite" alt="bundle size"></a>
+  <a href="https://github.com/jakub-gawlik/lenslite/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/coverage-100%25-brightgreen" alt="coverage 100%"></a>
+  <a href="https://github.com/jakub-gawlik/lenslite/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/jakub-gawlik/lenslite/ci.yml?branch=main" alt="CI status"></a>
+</p>
+
 A mobile-first, dependency-free lightbox gallery in TypeScript. All gestures
-supported from day one, 100% typed, 100% tested.
+supported from day one, 100% typed, 100% tested, under 5.5 kB brotlied.
+
+**[Live demo and docs at lenslite.art](https://lenslite.art)**
+
+<p align="center">
+  <img src="./assets/gestures.gif" width="280" alt="Swiping, double-tap zoom, panning, pinching and dragging to dismiss">
+</p>
 
 ## Gestures
 
@@ -18,9 +31,11 @@ supported from day one, 100% typed, 100% tested.
 | Pan while zoomed        | Move around the image, clamped to the frame, with momentum on release                                                                               |
 | Tap                     | Toggle the chrome (buttons and counter)                                                                                                             |
 
-Keyboard works too: `←` / `→` navigate, `Escape` closes, and `Tab` cycles the
-controls without leaving the dialog. Focus moves into the dialog on open and
-returns to the previously focused element on close. A polite live region
+Keyboard works too: `←` / `→` navigate, `Escape` closes (when zoomed in, the
+first press zooms back out), and `Tab` cycles the controls without leaving the
+dialog. Focus moves into the dialog on open and returns to the previously
+focused element on close, and the rest of the page is made `inert` while the
+viewer is open. A polite live region
 announces each image ("Image 2 of 9: …") to screen readers, and all transitions
 are disabled under `prefers-reduced-motion`.
 
@@ -32,18 +47,38 @@ Adjacent images are rendered on off-screen slides, so they are preloaded before
 you navigate to them. On viewport resize or device rotation the zoom pan is
 re-clamped to the new frame.
 
+## Install
+
+```sh
+npm install lenslite
+```
+
+Or without a build step, from a CDN. The IIFE build exposes a `lenslite`
+global:
+
+```html
+<script src="https://cdn.jsdelivr.net/npm/lenslite/dist/lenslite.min.js"></script>
+<script>
+  lenslite.LensLite.from('a[data-gallery]')
+</script>
+```
+
+Styles are injected automatically on first open. The same stylesheet is also
+published as `lenslite/lenslite.css` (`dist/lenslite.css` on the CDN) for
+pages whose Content-Security-Policy blocks inline styles.
+
 ## Usage
 
 ```ts
-import { LensLite } from "lenslite";
+import { LensLite } from 'lenslite'
 
 const box = new LensLite({
   items: [
-    { src: "/photos/one.jpg", alt: "One", caption: "Day one" },
+    { src: '/photos/one.jpg', alt: 'One', caption: 'Day one' },
     {
-      src: "/photos/two.jpg",
-      srcset: "/photos/two-800.jpg 800w, /photos/two-1600.jpg 1600w",
-      sizes: "100vw",
+      src: '/photos/two.jpg',
+      srcset: '/photos/two-800.jpg 800w, /photos/two-1600.jpg 1600w',
+      sizes: '100vw',
     },
   ],
   loop: true, // wrap around at the ends (default false)
@@ -51,13 +86,13 @@ const box = new LensLite({
   doubleTapZoom: 2.5,
   dismissThreshold: 100, // px of vertical drag that dismisses
   history: true, // back button closes the viewer (default true)
-});
+})
 
-box.open(0);
+box.open(0)
 
-box.on("change", (index) => console.log("now showing", index));
-box.on("error", (index) => console.log("image failed to load", index));
-box.on("close", () => console.log("closed"));
+box.on('change', (index) => console.log('now showing', index))
+box.on('error', (index) => console.log('image failed to load', index))
+box.on('close', () => console.log('closed'))
 ```
 
 ### Binding to existing markup
@@ -71,12 +106,17 @@ candidates come from `data-srcset` / `data-sizes`, or from the element's own
 `srcset` / `sizes` when the element itself is the image — an inner thumbnail's
 `srcset` is never used, since it lists the wrong files.
 
+Clicks are handled by a single delegated listener, and the matching elements
+are read again on every click, so thumbnails added to the page later (infinite
+scroll, client-side rendering) join the gallery without rebuilding it. Call
+`destroy()` to stop handling clicks.
+
 ```ts
-import { LensLite } from "lenslite";
+import { LensLite } from 'lenslite'
 
 // <a href="/photos/one.jpg" data-caption="Day one">
 //   <img src="/thumbs/one.jpg" alt="One"></a> …
-const box = LensLite.from("a[data-gallery]", { loop: true });
+const box = LensLite.from('a[data-gallery]', { loop: true })
 ```
 
 If an image fails to load, the viewer shows an inline "Image failed to load"
@@ -84,7 +124,7 @@ message on that slide and emits the `error` event with the failed item's index
 (neighboring slides preload, so this can fire for an image you are not looking
 at yet).
 
-Styles are injected automatically on first open. The `GestureController`
+The `GestureController`
 (Pointer Events → tap / double-tap / pan / swipe / pinch) is exported on its own
 if you want to build something else with it.
 
@@ -92,11 +132,29 @@ if you want to build something else with it.
 
 ```sh
 npm install
-npm test               # run the suite
+npm test               # unit tests (Vitest + jsdom)
 npm run test:coverage  # enforces 100% lines/branches/functions/statements
+npm run test:e2e       # Playwright: Chromium, Firefox, WebKit, Pixel 7, iPhone 14
 npm run typecheck
-npm run build          # emits ESM + d.ts to dist/
+npm run build          # dist/: minified ESM, IIFE, lenslite.css, .d.ts
+npm run size           # checks the bundles against .size-limit.json
 ```
 
-To try the demo: `npm run build`, then serve the repo root (for example
-`npx serve .`) and open `/demo/`.
+The first `test:e2e` run needs the browsers: `npx playwright install`. The
+real-browser suite covers what jsdom cannot: gestures, layout-dependent pan
+clamping, resize re-clamping and the history integration.
+
+Bundle size is a feature: CI fails when a bundle grows past its budget in
+`.size-limit.json`. Raise a budget only on purpose.
+
+### Releasing
+
+Releases go through [Changesets](https://github.com/changesets/changesets).
+Add a changeset to every user-facing PR with `npx changeset`. On `main`, the
+Release workflow keeps a "Version Packages" PR up to date; merging it publishes
+to npm with provenance, tags `vX.Y.Z`, creates a GitHub release and updates
+`CHANGELOG.md`. Publishing needs an `NPM_TOKEN` repository secret.
+
+## Roadmap
+
+See [ROADMAP.md](ROADMAP.md) for planned work and where the project is heading.

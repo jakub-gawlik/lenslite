@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LensLite e2e fixture</title>
+  <style>
+    body { margin: 0; padding: 16px; font: 16px system-ui, sans-serif; }
+    #grid { display: grid; grid-template-columns: repeat(3, 80px); gap: 8px; }
+    #grid img { width: 80px; height: 80px; display: block; }
+  </style>
+</head>
+<body>
+  <div id="grid"></div>
+  <script type="module">
+    import { LensLite } from '/dist/index.js'
+
+    // Self-contained SVG images with known intrinsic sizes: no network.
+    const svg = (w, h, fill, label) =>
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">` +
+      `<rect width="100%" height="100%" fill="${fill}"/>` +
+      `<text x="50%" y="50%" font-size="${h / 6}" text-anchor="middle" ` +
+      `dominant-baseline="middle" fill="#fff">${label}</text></svg>`
+    const image = (w, h, fill, label) =>
+      `data:image/svg+xml,${encodeURIComponent(svg(w, h, fill, label))}`
+
+    const photos = [
+      [1200, 800, '#c0392b', 'One'],
+      [800, 1200, '#27ae60', 'Two'],
+      [1200, 800, '#2980b9', 'Three'],
+    ]
+    const grid = document.getElementById('grid')
+    for (const [w, h, fill, label] of photos) {
+      const a = document.createElement('a')
+      a.href = image(w, h, fill, label)
+      a.dataset.caption = label
+      const img = document.createElement('img')
+      img.src = image(80, 80, fill, label)
+      img.alt = label
+      a.appendChild(img)
+      grid.appendChild(a)
+    }
+
+    const params = new URLSearchParams(location.search)
+    const box = LensLite.from('#grid a', {
+      loop: params.has('loop'),
+      history: !params.has('nohistory'),
+    })
+    window.events = []
+    for (const name of ['open', 'close', 'change', 'error']) {
+      box.on(name, (index) => window.events.push(`${name}:${index}`))
+    }
+    window.box = box
+  </script>
+</body>
+</html>
